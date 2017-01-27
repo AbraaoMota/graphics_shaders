@@ -1,0 +1,78 @@
+#version 400 
+
+uniform mat4 mvMatrix;
+uniform mat4 pMatrix;
+uniform mat3 normalMatrix; //mv matrix without translation
+
+uniform vec4 lightPosition_camSpace; //light Position in camera space
+
+uniform float rotation;
+uniform vec4 color;
+
+in vec4 vertex_worldSpace;
+in vec3 normal_worldSpace;
+in vec2 textureCoordinate_input;
+
+out data
+{
+  vec4 position_camSpace;
+  vec3 normal_camSpace;
+  vec2 textureCoordinate;
+  vec4 color;
+}vertexIn;
+
+//Vertex shader compute the vectors per vertex
+void main(void)
+{
+  //Put the vertex in the correct coordinate system by applying the model view matrix
+  vec3 new_axis = vec3(0.5, 0.5, 0.75);
+  
+  // Translation of the origin
+  vec4 x_axis = vec4(1.0, 0.0, 0.0, 0.0);
+  //vec4 x_axis = vec4(1.0, 0.0, 0.0, -new_axis.x);
+
+  vec4 y_axis = vec4(0.0, 1.0, 0.0, 0.0);
+  //vec4 y_axis = vec4(0.0, 1.0, 0.0, -new_axis.y);
+
+  vec4 z_axis = vec4(0.0, 0.0, 1.0, 0.0);
+  //vec4 z_axis = vec4(0.0, 0.0, 1.0, -new_axis.z);
+
+  vec4 scalar_axis = vec4(-new_axis.x, -new_axis.y, -new_axis.z, 1.0);
+  //vec4 scalar_axis = vec4(0.0, 0.0, 0.0, 1.0);
+  mat4 translation = mat4(x_axis, y_axis, z_axis, scalar_axis);
+
+  // Rotate about the y-axis
+  float d_proj_size = sqrt(new_axis.x*new_axis.x + new_axis.z*new_axis.z);
+  float cos_y_theta = new_axis.z / d_proj_size;
+  float sin_y_theta = new_axis.x / d_proj_size;
+
+  vec4 rotX = vec4(cos_y_theta, 0, sin_y_theta, 0);
+  vec4 rotY = vec4(0, 1, 0, 0);
+  vec4 rotZ = vec4(-sin_y_theta, 0, cos_y_theta, 0);
+  vec4 rotScalar = vec4(0, 0, 0, 1);
+	  
+  mat4 rotation = mat4(rotX, rotY, rotZ, rotScalar);
+
+  //mat4 transformations = rotation * translation;
+  mat4 transformations = translation; 
+
+  vec4 final_transformation = transformations * vertex_worldSpace;
+  
+  //vec4 vertex_camSpace = mvMatrix*vertex_worldSpace; 
+  vec4 vertex_camSpace = mvMatrix*final_transformation; 
+  vertexIn.position_camSpace = vertex_camSpace;
+  
+  //Apply the model-view transformation to the normal (only rotation, no translation)
+  //Normals put in the camera space
+  
+  vertexIn.normal_camSpace = normalize(normalMatrix*normal_worldSpace);
+  
+  //Color chosen as red
+  vertexIn.color = vec4(1.0, 0.0, 0.0, 1.0);
+  //vertexIn.color = color;
+  
+  //Texture coordinate
+  vertexIn.textureCoordinate = textureCoordinate_input;
+	  
+  gl_Position = pMatrix * vertex_camSpace;
+}	
