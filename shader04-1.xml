@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<pipeline>
+<vertex>
+<![CDATA[#version 400 
+
+uniform mat4 mvMatrix;
+uniform mat4 pMatrix;
+uniform mat3 normalMatrix; //mv matrix without translation
+
+uniform vec4 lightPosition_camSpace; //light Position in camera space
+
+uniform vec4 ambient;
+uniform vec4 diffuse;
+uniform vec4 specular;
+uniform float shininess;
+uniform float ambientCoefficent;
+uniform float diffuseCoefficent;
+uniform float specularCoefficent;
+
+in vec4 vertex_worldSpace;
+in vec3 normal_worldSpace;
+in vec2 textureCoordinate_input;
+
+out data
+{
+  vec4 position_camSpace;
+  vec3 normal_camSpace;
+  vec2 textureCoordinate;
+  vec4 color;
+}vertexInOut;
+
+//Vertex shader compute the vectors per vertex
+void main(void)
+{
+  //Put the vertex in the correct coordinate system by applying the model view matrix
+  vec4 vertex_camSpace = mvMatrix*vertex_worldSpace; 
+  vertexInOut.position_camSpace = vertex_camSpace;
+  
+  //Apply the model-view transformation to the normal (only rotation, no translation)
+  //Normals put in the camera space
+  vertexInOut.normal_camSpace = normalize(normalMatrix*normal_worldSpace);
+  
+  //Color chosen as red
+  vertexInOut.color = vec4(1.0, 0.0, 0.0, 1.0);
+  
+  //Texture coordinate
+  vertexInOut.textureCoordinate = textureCoordinate_input;
+  
+  gl_Position = pMatrix * vertex_camSpace;
+}
+
+
+
+
+
+
+
+]]></vertex>
+<geom>
+<![CDATA[#version 400 
+
+layout(triangles) in;
+layout(triangle_strip, max_vertices = 128) out;
+
+uniform mat4 mvMatrix;
+uniform mat4 pMatrix;
+uniform mat3 normalMatrix; //mv matrix without translation
+
+uniform vec4 lightPosition_camSpace; //light Position in camera space
+
+uniform int subDivision;
+
+in data
+{
+  vec4 position_camSpace;
+  vec3 normal_camSpace;
+  vec2 textureCoordinate;
+   vec4 color;
+}vertexIn[3];
+
+out fragmentData
+{
+  vec4 position_camSpace;
+  vec3 normal_camSpace;
+  vec2 textureCoordinate;
+  vec4 color;
+} frag;
+
+void main() {
+
+	// Apply an up and down algorithm
+	// It covers from the bottom of the triangle upwards
+	// On each iteration it creates a triangle strip that converges to just a triangle 
+	// on the last layer
+	// Every 'up' movement moves up (and diagonally to the 'left' of the triangle)
+	// whilst every down movement moves directly downwards
+	// This uses a interpolated value calculated by the barycentric co-ordinates of the triangle
+	// which is dependent on the level of subdivisions applied
+	// Assume we start at barycentric point (1,0,0);
+	float alpha = 1.0;
+	float beta = 0.0;
+	float gamma = 0.0;
+	vec4 v1Pos = gl_in[0].gl_Position;
+	vec4 v2Pos = gl_in[1].gl_Position;
+	vec4 v3Pos = gl_in[2].gl_Position;
+	vec3 interpolated_normal = normalize(alpha * vertexIn[0].normal_camSpace + beta * vertexIn[1].normal_camSpace + gamma * vertexIn[2].normal_camSpace);
+	vec4	 interpolated_color = alpha * vertexIn[0].color + beta * vertexIn[1].color + gamma * vertexIn[2].color;
+	vec4	 interpolated_camSpace = alpha * vertexIn[0].position_camSpace + beta * vertexIn[1].position_camSpace + gamma * vertexIn[2].position_camSpace;
+	vec2 interpolated_texture = alpha * vertexIn[0].textureCoordinate + beta * vertexIn[1].textureCoordinate + gamma * vertexIn[2].textureCoordinate;
+
+	for (int i = 0; i < pow(2, subDivision); i++) {
+		// Emit current vertex
+	    gl_Position = alpha * v1Pos + beta * v2Pos + gamma * v3Pos;
+		frag.normal_camSpace = interpolated_normal;
+		frag.color = interpolated_color;
+		frag.position_camSpace = interpolated_camSpace;
+		frag.textureCoordinate = interpolated_texture;
+		EmitVertex();
+
+		for (int j = 0; j < pow(2, subDivision) - i; j++) {
+			// Start with the upwards movement
+			beta += 1 / pow(2, subDivision);
+			alpha = 1 - beta - gamma; 
+
+	    		gl_Position = alpha * v1Pos + beta * v2Pos + gamma * v3Pos;
+			frag.normal_camSpace = interpolated_normal;
+			frag.color = interpolated_color;
+			frag.position_camSpace = interpolated_camSpace;
+			frag.textureCoordinate = interpolated_texture;
+			EmitVertex();		
+
+			// Downwards movement
+			gamma += 1 / pow(2, subDivision);
+			beta -= 1 / pow(2, subDivision);
+			alpha = 1 - gamma - beta;
+
+	    		gl_Position = alpha * v1Pos + beta * v2Pos + gamma * v3Pos;
+			frag.normal_camSpace = interpolated_normal;
+			frag.color = interpolated_color;
+			frag.position_camSpace = interpolated_camSpace;
+			frag.textureCoordinate = interpolated_texture;
+			EmitVertex();
+		}
+	
+		// Prepare values for next strip iteration
+		beta += 1 / pow(2, subDivision);
+		gamma = 0;
+		alpha = 1 - beta - gamma;
+	
+		// Move onto the next strip
+		EndPrimitive();
+	}
+}	
+
+
+
+
+
+]]></geom>
+<frag>
+<![CDATA[#version 400
+
+uniform vec4 ambient;
+uniform vec4 diffuse;
+uniform vec4 specular;
+uniform float shininess;
+uniform float ambientCoefficent;
+uniform float diffuseCoefficent;
+uniform float specularCoefficent;
+
+uniform vec4 lightPosition_camSpace; //light Position in camera space
+
+in fragmentData
+{
+  vec4 position_camSpace;
+  vec3 normal_camSpace;
+  vec2 textureCoordinate;
+  vec4 color;
+} frag;
+
+out vec4 fragColor; 
+
+//Fragment shader computes the final color
+void main(void)
+{
+  fragColor =  frag.color;
+}
+
+
+
+
+
+
+
+]]></frag>
+<R2TVert>
+<![CDATA[#version 400
+
+uniform mat4 mvMatrix;
+uniform mat4 pMatrix;
+
+in vec4 vertex_worldSpace;
+in vec2 textureCoordinate_input;
+
+out vec2 varyingTextureCoordinate;
+
+//Vertex shader compute the vectors per vertex
+void main(void)
+{
+  //Put the vertex in the correct coordinate system by applying the model view matrix
+  vec4 vertex_camSpace = mvMatrix*vertex_worldSpace;
+
+  varyingTextureCoordinate = textureCoordinate_input;
+  gl_Position = pMatrix * vertex_camSpace;
+}
+
+
+
+
+
+
+
+]]></R2TVert>
+<R2TFrag>
+<![CDATA[#version 400
+
+uniform sampler2D textureRendered;
+
+in vec2 varyingTextureCoordinate;
+
+out vec4 fragColor;
+
+void main(void)
+{
+  //Render the texture on a quad
+  fragColor = texture2D(textureRendered, varyingTextureCoordinate.st);
+}
+
+
+
+
+
+
+
+]]></R2TFrag>
+</pipeline>

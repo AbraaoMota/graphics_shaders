@@ -1,0 +1,522 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<pipeline>
+<vertex>
+<![CDATA[#version 400
+
+uniform mat4 mvMatrix;
+uniform mat4 pMatrix;
+uniform mat3 normalMatrix; //mv matrix without translation
+
+uniform vec4 lightPosition_camSpace; //light Position in camera space
+
+in vec4 vertex_worldSpace;
+in vec3 normal_worldSpace;
+in vec2 textureCoordinate_input;
+
+out data
+{
+	vec4 position_camSpace;
+	vec3 normal_camSpace;
+	vec2 textureCoordinate;
+	vec4 color;
+}vertexIn;
+
+//Vertex shader compute the vectors per vertex
+void main(void)
+{
+    //Put the vertex in the correct coordinate system by applying the model view matrix
+    vec4 vertex_camSpace = mvMatrix*vertex_worldSpace;
+	vertexIn.position_camSpace = vertex_camSpace;
+	
+    //Apply the model-view transformation to the normal (only rotation, no translation)
+    //Normals put in the camera space
+    vertexIn.normal_camSpace = normalize(normalMatrix*normal_worldSpace);
+
+	//Color chosen as red
+	vertexIn.color = vec4(1.0,0.0,0.0,1.0);
+    
+    //Texture coordinate
+    vertexIn.textureCoordinate = textureCoordinate_input;
+	
+    gl_Position = pMatrix * vertex_camSpace;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+]]></vertex>
+<geom>
+<![CDATA[#version 400
+
+layout(triangles) in;
+layout(triangle_strip, max_vertices = 3) out;
+
+uniform mat4 mvMatrix;
+uniform mat4 pMatrix;
+uniform mat3 normalMatrix; //mv matrix without translation
+
+uniform vec4 lightPosition_camSpace; //light Position in camera space
+
+
+in data
+{
+	vec4 position_camSpace;
+	vec3 normal_camSpace;
+	vec2 textureCoordinate;
+	vec4 color;
+}vertexIn[3];
+
+out fragmentData
+{
+	vec4 position_camSpace;
+	vec3 normal_camSpace;
+	vec2 textureCoordinate;
+	vec4 color;
+} frag;
+
+
+void main() {
+  for(int i = 0; i < 3; i++) { // You used triangles, so it's always 3
+    gl_Position = gl_in[i].gl_Position;
+	frag.position_camSpace = vertexIn[i].position_camSpace;
+	frag.normal_camSpace = vertexIn[i].normal_camSpace;
+	frag.textureCoordinate = vertexIn[i].textureCoordinate;
+	frag.color = vertexIn[i].color;
+    EmitVertex();
+  }
+  EndPrimitive();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+]]></geom>
+<frag>
+<![CDATA[#version 400
+
+uniform vec4 ambient;
+uniform vec4 diffuse;
+uniform vec4 specular;
+uniform float shininess;
+
+uniform vec4 lightPosition_camSpace; //light Position in camera space
+
+in fragmentData
+{
+	vec4 position_camSpace;
+	vec3 normal_camSpace;
+	vec2 textureCoordinate;
+	vec4 color;
+} frag;
+
+
+out vec4 fragColor;
+
+//Fragment shader computes the final color
+void main(void)
+{
+	//Not used in that task
+    fragColor =  frag.color;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+]]></frag>
+<R2TVert>
+<![CDATA[#version 400
+#extension GL_ARB_separate_shader_objects : enable
+
+uniform mat4 mMatrix;
+uniform mat4 mvMatrix;
+
+in vec4 vertex_worldSpace;
+in vec3 normal_worldSpace;
+
+out vec3 dir; 
+
+void  main () 
+{ 
+	vec4 vertex_modelSpace = mMatrix*vertex_worldSpace;
+	
+    dir = normalize ( vec3 ( vertex_modelSpace.x * 1.6,  vertex_modelSpace.y , -1.0 )); 
+	
+    gl_Position  = vertex_modelSpace; 
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+]]></R2TVert>
+<R2TFrag>
+<![CDATA[#version 400
+
+in vec3 dir; 
+out vec4 outcolour;
+
+uniform mat4 mMatrix;
+uniform mat4 mvMatrix;
+uniform mat4 mvMatrixScene;
+uniform mat4 pMatrix;
+uniform mat3 normalMatrix; //mv matrix without translation
+
+const int raytraceDepth = 42;
+const int numSpheres = 6;
+const float pi = 3.1415926535897932384626433832795;
+
+// Preset Colours
+const vec3 black = vec3(0,0,0);
+const vec3 white = vec3(1,1,1);
+const vec3 checker_1 = vec3(0.2, 0.2, 0.2);
+const vec3 checker_2 = vec3(0.5, 0.5, 0.5);
+
+// Light Position
+//const vec3 light_pos = vec3(6,4,3);
+const vec3 light_pos = vec3(6,3, -0.5);
+
+// Bias constant
+const float epsilon = 0.000001;
+
+// Reflection and refraction constants
+const float k_reflect = 0.8;
+const float k_refract = 0.2;
+
+// Snell constants
+const float air_snell = 1;
+const float glass_snell = 1.52;
+const float water_snell = 1.33;
+
+// Camera filter constant
+const float cam_filter = 0.35;
+
+//example data structures
+struct Ray
+{
+	vec3 origin;
+	vec3 dir;
+};
+struct Sphere
+{
+	vec3 centre;
+	float radius;
+	vec3 colour;
+};
+struct Plane
+{
+	vec3 point;
+	vec3 normal;
+	vec3 colour;
+};
+
+struct Intersection
+{
+    float t; //closest hit
+    vec3 point;	// hit point
+    vec3 normal;	// normal
+    int hit;	//did it hit?
+    vec3 colour; // colour accumulation, can be also implemented in struct Ray
+};
+
+void plane_intersect(Plane pl, Ray ray, inout Intersection intersect)
+{
+	vec3 point_to_plane = ray.origin - pl.point;
+	float p2plane_dot_normal = dot(point_to_plane, pl.normal);
+	float direction_dot_normal = dot(ray.dir, pl.normal);
+	float dist = -(p2plane_dot_normal / direction_dot_normal);
+
+	if (dist > 0 && ((dist < intersect.t) || intersect.t == -1 )) {
+		intersect.t = dist;	
+		intersect.hit = 1;
+		intersect.normal = pl.normal;
+		vec3 new_point = ray.origin + (dist * ray.dir);
+		intersect.point = new_point;
+		int x = int(floor(new_point.x * 10));
+		int z = int(floor(new_point.z * 10));
+		if ((x + z) % 2 == 0) {
+			intersect.colour *= black;
+		} else {
+			intersect.colour *= white;
+		}
+	}
+}
+
+void sphere_intersect(Sphere sph, Ray ray, inout Intersection intersect)
+{ 
+	vec3 delta_p = ray.origin - sph.centre;
+	float d_dot_delta_p = dot(ray.dir, delta_p);
+	float discrim = pow(d_dot_delta_p, 2) - pow(length(delta_p), 2) + pow(sph.radius, 2);
+	if (discrim > 0) {	
+		float dist_1 = -d_dot_delta_p + sqrt(discrim);
+		float dist_2 = -d_dot_delta_p - sqrt(discrim);
+
+		if (dist_2 > 0 && (dist_2 < intersect.t || intersect.t == -1)) {				
+			intersect.hit = 1;
+			intersect.t = dist_2;
+			intersect.point = ray.origin + (dist_2 * ray.dir);
+			intersect.normal = normalize(intersect.point - sph.centre);
+			intersect.colour *= sph.colour;
+		}
+	}
+}
+
+Sphere sphere[numSpheres];
+Plane plane;
+
+void Intersect(Ray r, inout Intersection i)
+{
+	plane_intersect(plane, r, i);
+	for (int j = 0; j < numSpheres; j++) {
+		sphere_intersect(sphere[j], r, i);
+	}
+//	plane_intersect(plane, r, i);
+}
+
+vec3 phong_shader(Intersection intersect)
+{
+	// This shader is only really doing diffuse shading, the other effects are not visible
+	float k_d = 85;
+	float dist_light = length(light_pos - intersect.point);
+	vec3 light_direction = normalize(light_pos - intersect.point);
+	return (k_d * dot(intersect.normal, light_direction) / pow(dist_light, 2)) * intersect.colour;
+}
+
+vec3 computeShadow(Intersection intersect)
+{
+	Ray point_to_light;
+	point_to_light.dir = normalize(light_pos - intersect.point);
+	point_to_light.origin = intersect.point + epsilon * intersect.normal;
+
+	Intersection shadow_intersection;
+	shadow_intersection.hit = 0;
+    shadow_intersection.t = -1;
+	shadow_intersection.colour = vec3(0,0,0); 
+	shadow_intersection.point = vec3(0,0,0);
+	shadow_intersection.normal = vec3(0,0,0);
+
+	Intersect(point_to_light, shadow_intersection);
+
+	if (shadow_intersection.hit == 1) {
+		return black;
+	} else {
+		return phong_shader(intersect);
+	}
+}
+
+int seed = 0;
+float rnd()
+{
+	seed = int(mod(float(seed)*1364.0+626.0, 509.0));
+	return float(seed)/509.0;
+}
+/*
+Intersection mirror_intersect(Ray ray, Intersection intersection)
+{
+	Ray mirror;
+	mirror.origin = intersection.point + epsilon * intersection.normal;
+	mirror.dir = ray.dir - dot(2*ray.dir, intersection.normal)*intersection.normal;
+
+	Intersection mirror_intersection;
+	mirror_intersection.hit = 0;
+	mirror_intersection.colour = vec3(0); 
+    mirror_intersection.t = -1;
+	mirror_intersection.point = vec3(0,0,0);
+	mirror_intersection.normal = vec3(0,0,0);
+
+	Intersect(mirror, mirror_intersection);
+	
+
+	return mirror_intersection;
+}
+*/
+/*
+vec3 refract_intersect(Ray ray, Intersection intersection)
+{	
+	Ray refract_ray;
+	refract_ray.origin = intersection.point;
+
+	float snell_const_1 = air_snell / glass_snell;
+	float snell_const_2 = glass_snell / air_snell;
+	float n_dot_v = 	dot(intersection.normal, ray.dir);
+	float sqrt_const = sqrt(pow(n_dot_v, 2) + pow(snell_const_2, 2) - 1);
+//	refract_dir = snell_const_1 * (dot(sqrt_const - n_dot_v, intersection.normal) + ray.dir);
+	vec3 refract_dir = snell_const_1 * (sqrt_const - n_dot_v) * intersection.normal + ray.dir;
+	refract_ray.dir = refract_dir;
+
+	Intersection refract_intersection;
+	refract_intersection.hit = 0;
+	refract_intersection.colour = vec3(0); 
+    refract_intersection.t = -1;
+	refract_intersection.point = vec3(0,0,0);
+	refract_intersection.normal = vec3(0,0,0);
+
+	Intersect(refract_ray, refract_intersection);
+	return refract_intersection.colour;
+}
+*/
+void main()
+{
+	//please leave the scene config unaltered for marking 
+	sphere[0].centre   = vec3(-2.0, 1.5, -3.5);
+	sphere[0].radius   = 1.5;
+	sphere[0].colour = vec3(0.8,0.8,0.8);
+	sphere[1].centre   = vec3(-0.5, 0.0, -2.0);
+	sphere[1].radius   = 0.6;
+	sphere[1].colour = vec3(0.3,0.8,0.3);
+	sphere[2].centre   = vec3(1.0, 0.7, -2.2);
+	sphere[2].radius   = 0.8;
+	sphere[2].colour = vec3(0.3,0.8,0.8);
+	sphere[3].centre   = vec3(0.7, -0.3, -1.2);
+	sphere[3].radius   = 0.2;
+	sphere[3].colour = vec3(0.8,0.8,0.3);
+	sphere[4].centre   = vec3(-0.7, -0.3, -1.2);
+	sphere[4].radius   = 0.2;
+	sphere[4].colour = vec3(0.8,0.3,0.3);
+	sphere[5].centre   = vec3(0.2, -0.2, -1.2);
+	sphere[5].radius   = 0.3;
+	sphere[5].colour = vec3(0.8,0.3,0.8);
+	plane.point = vec3(0,-0.5, 0);
+	plane.normal = vec3(0, 1.0, 0);
+	plane.colour = vec3(1, 1, 1);
+	seed = int(mod(dir.x * dir.y * 39786038.0, 65536.0));
+	//scene definition end
+
+	Ray ray;
+	ray.origin = vec3(0,0,0);
+	ray.dir = normalize(dir);
+
+	vec3 colour = vec3(0,0,0);
+
+	float frac = 1.0;
+	Intersection intersection;
+	intersection.point = vec3(0,0,0);
+	intersection.colour = vec3(1);
+
+	for (int i = 0; i < 2; i++) {
+		// Initialize / reset ray intersection		
+//		intersection.hit = 0;
+//		intersection.colour = colour;
+
+	    intersection.t = -1;
+		intersection.normal = vec3(0,0,0);
+
+		// Initial intersection
+		Intersect(ray, intersection);
+
+		// Shadow & diffuse shading
+		vec3 local_shading = computeShadow(intersection);
+
+		// Colour 
+		colour += local_shading * k_reflect * frac;
+
+		// Decrease strength of reflected ray
+		frac *= k_reflect;
+
+		// Reflect the ray
+		ray.origin = intersection.point + epsilon * intersection.normal;
+		ray.dir = reflect(ray.dir, normalize(intersection.normal));	
+
+	}
+
+	vec4 final_colour = vec4(colour.x, colour.y, colour.z, 1) * cam_filter;
+	outcolour = final_colour;
+}
+
+
+
+
+
+
+
+
+
+]]></R2TFrag>
+</pipeline>

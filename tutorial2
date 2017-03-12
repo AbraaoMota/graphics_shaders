@@ -6,7 +6,7 @@ uniform mat3 normalMatrix; //mv matrix without translation
 
 uniform vec4 lightPosition_camSpace; //light Position in camera space
 
-uniform float rotation;
+uniform float user_rotation;
 uniform vec4 color;
 
 in vec4 vertex_worldSpace;
@@ -29,32 +29,53 @@ void main(void)
   
   // Translation of the origin
   vec4 x_axis = vec4(1.0, 0.0, 0.0, 0.0);
-  //vec4 x_axis = vec4(1.0, 0.0, 0.0, -new_axis.x);
-
   vec4 y_axis = vec4(0.0, 1.0, 0.0, 0.0);
-  //vec4 y_axis = vec4(0.0, 1.0, 0.0, -new_axis.y);
-
   vec4 z_axis = vec4(0.0, 0.0, 1.0, 0.0);
-  //vec4 z_axis = vec4(0.0, 0.0, 1.0, -new_axis.z);
-
   vec4 scalar_axis = vec4(-new_axis.x, -new_axis.y, -new_axis.z, 1.0);
-  //vec4 scalar_axis = vec4(0.0, 0.0, 0.0, 1.0);
   mat4 translation = mat4(x_axis, y_axis, z_axis, scalar_axis);
 
   // Rotate about the y-axis
-  float d_proj_size = sqrt(new_axis.x*new_axis.x + new_axis.z*new_axis.z);
-  float cos_y_theta = new_axis.z / d_proj_size;
-  float sin_y_theta = new_axis.x / d_proj_size;
+  float y_proj_size = sqrt(new_axis.x*new_axis.x + new_axis.z*new_axis.z);
+  float cos_y_theta = new_axis.z / y_proj_size;
+  float sin_y_theta = new_axis.x / y_proj_size;
 
   vec4 rotX = vec4(cos_y_theta, 0, sin_y_theta, 0);
   vec4 rotY = vec4(0, 1, 0, 0);
   vec4 rotZ = vec4(-sin_y_theta, 0, cos_y_theta, 0);
-  vec4 rotScalar = vec4(0, 0, 0, 1);
-	  
-  mat4 rotation = mat4(rotX, rotY, rotZ, rotScalar);
+  vec4 rotScalar = vec4(0, 0, 0, 1);	  
+  mat4 rotationY = mat4(rotX, rotY, rotZ, rotScalar);
 
-  //mat4 transformations = rotation * translation;
-  mat4 transformations = translation; 
+  // Rotate about the x-axis
+  float d_size = sqrt(new_axis.y*new_axis.y + y_proj_size*y_proj_size);
+  float cos_x_phi = y_proj_size / d_size;
+  float sin_x_phi = new_axis.y / d_size;
+
+  vec4 xrotX = vec4(1, 0, 0, 0);
+  vec4 xrotY = vec4(0, cos_x_phi, sin_x_phi, 0);
+  vec4 xrotZ = vec4(0, -sin_x_phi, cos_x_phi, 0);
+  vec4 xrotScalar = vec4(0, 0, 0, 1);
+  mat4 rotationX = mat4(xrotX, xrotY, xrotZ, xrotScalar);
+
+  // Finally, rotate by user defined point
+  float sin_user_rot = sin(user_rotation);
+  float cos_user_rot = cos(user_rotation);
+  vec4 x_user_rot = vec4(cos_user_rot, sin_user_rot, 0, 0);
+  vec4 y_user_rot = vec4(-sin_user_rot, cos_user_rot, 0, 0);
+  vec4 z_user_rot = vec4(0, 0, 1, 0);
+  vec4 scale_user_rot = vec4(0, 0, 0, 1);
+  mat4 userRotation = mat4(x_user_rot, y_user_rot, z_user_rot, scale_user_rot);
+
+  ////////////////////////////////////////////
+  // Scale the object by 50%
+
+  vec4 half_x_scale = vec4(1.5, 0, 0 ,0);
+  vec4 half_y_scale = vec4(0, 1.5, 0, 0);
+  vec4 half_z_scale = vec4(0, 0, 1.5, 0);
+  vec4 half_scalar = vec4(0, 0, 0, 1.5);
+  mat4 half_scale = mat4(half_x_scale, half_y_scale, half_z_scale, half_scalar);
+ 
+  // Apply all the transformations
+  mat4 transformations = half_scale * userRotation * rotationX * rotationY * translation;
 
   vec4 final_transformation = transformations * vertex_worldSpace;
   
