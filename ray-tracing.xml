@@ -70,6 +70,7 @@ void main(void)
 
 
 
+
 ]]></vertex>
 <geom>
 <![CDATA[#version 400
@@ -112,6 +113,7 @@ void main() {
   }
   EndPrimitive();
 }
+
 
 
 
@@ -185,6 +187,7 @@ void main(void)
 
 
 
+
 ]]></frag>
 <R2TVert>
 <![CDATA[#version 400
@@ -236,6 +239,7 @@ void  main ()
 
 
 
+
 ]]></R2TVert>
 <R2TFrag>
 <![CDATA[#version 400
@@ -256,24 +260,33 @@ const float pi = 3.1415926535897932384626433832795;
 // Preset Colours
 const vec3 black = vec3(0,0,0);
 const vec3 white = vec3(1,1,1);
-const vec3 checker_1 = vec3(0.2, 0.2, 0.2);
-const vec3 checker_2 = vec3(0.5, 0.5, 0.5);
 
-// Light Position
-//const vec3 light_pos = vec3(6,4,3);
-const vec3 light_pos = vec3(6,3, -0.5);
+///////////////////////////////
+// LIGHTING
+//
+// SOFT SHADOWS EXTENSION FLAG
+bool soft_shadows = false; // Enabling this flag cuts performance by half
+
+// Normal light position
+const vec3 light_pos = vec3(6,4, -0.5);
+
+// Soft shadow lighting positions
+const vec3 ss_light_1 = vec3(5, 4, 0.2);
+const vec3 ss_light_2 = vec3(7, 4, 0.2);
+const vec3 ss_light_3 = vec3(5, 4, 1.2);
+const vec3 ss_light_4 = vec3(7, 4, 1.2);
 
 // Bias constant
 const float epsilon = 0.000001;
 
-// Reflection and refraction constants
+// Reflectivity constant
 const float k_reflect = 0.8;
-const float k_refract = 0.2;
 
-// Snell constants
-const float air_snell = 1;
-const float glass_snell = 1.52;
-const float water_snell = 1.33;
+// Diffuse strength
+const float k_d = 120;
+
+// Checkerboard square size
+const int square_size = 15;
 
 // Camera filter constant
 const float cam_filter = 0.35;
@@ -319,8 +332,8 @@ void plane_intersect(Plane pl, Ray ray, inout Intersection intersect)
 		intersect.normal = pl.normal;
 		vec3 new_point = ray.origin + (dist * ray.dir);
 		intersect.point = new_point;
-		int x = int(floor(new_point.x * 10));
-		int z = int(floor(new_point.z * 10));
+		int x = int(floor(new_point.x * square_size));
+		int z = int(floor(new_point.z * square_size));
 		if ((x + z) % 2 == 0) {
 			intersect.colour *= black;
 		} else {
@@ -353,41 +366,80 @@ Plane plane;
 
 void Intersect(Ray r, inout Intersection i)
 {
-	plane_intersect(plane, r, i);
+	// Intersect spheres in increasing distance
 	for (int j = 0; j < numSpheres; j++) {
-		sphere_intersect(sphere[j], r, i);
+		sphere_intersect(sphere[numSpheres - j - 1], r, i);
 	}
-//	plane_intersect(plane, r, i);
+	plane_intersect(plane, r, i);
 }
 
-vec3 phong_shader(Intersection intersect)
+//vec3 phong_shader(Intersection intersect)
+vec3 phong_shader(Intersection intersect, vec3 light_position)
 {
 	// This shader is only really doing diffuse shading, the other effects are not visible
-	float k_d = 85;
-	float dist_light = length(light_pos - intersect.point);
-	vec3 light_direction = normalize(light_pos - intersect.point);
+	float dist_light = length(light_position - intersect.point);
+	vec3 light_direction = normalize(light_position - intersect.point);
 	return (k_d * dot(intersect.normal, light_direction) / pow(dist_light, 2)) * intersect.colour;
 }
 
 vec3 computeShadow(Intersection intersect)
 {
-	Ray point_to_light;
-	point_to_light.dir = normalize(light_pos - intersect.point);
-	point_to_light.origin = intersect.point + epsilon * intersect.normal;
+	if (!soft_shadows) {
+		// Initialize ray from point to light source
+		Ray point_to_light;
+		point_to_light.dir = normalize(light_pos - intersect.point);
+		point_to_light.origin = intersect.point + epsilon * intersect.normal;
 
-	Intersection shadow_intersection;
-	shadow_intersection.hit = 0;
-    shadow_intersection.t = -1;
-	shadow_intersection.colour = vec3(0,0,0); 
-	shadow_intersection.point = vec3(0,0,0);
-	shadow_intersection.normal = vec3(0,0,0);
-
-	Intersect(point_to_light, shadow_intersection);
-
-	if (shadow_intersection.hit == 1) {
-		return black;
+		// Create fresh object to calculate if shadowed point or not
+		Intersection shadow_intersection;
+		shadow_intersection.hit = 0;
+	    shadow_intersection.t = -1;
+		shadow_intersection.colour = vec3(0,0,0); 
+		shadow_intersection.point = vec3(0,0,0);
+		shadow_intersection.normal = vec3(0,0,0);
+	
+		Intersect(point_to_light, shadow_intersection);
+	
+		// Multiply by black if shadowed, calculate diffuse otherwise
+		if (shadow_intersection.hit == 1) {
+			return black;
+		} else {
+			return phong_shader(intersect, light_pos);
+		}
 	} else {
-		return phong_shader(intersect);
+		const int light_source_count = 5;
+		vec3 light_source[light_source_count];
+		light_source[0] = ss_light_1;
+		light_source[1] = ss_light_2;
+		light_source[2] = ss_light_3;
+		light_source[3] = ss_light_4;
+		light_source[4] = light_pos;
+
+		vec3 soft_shadow = vec3(0,0,0);
+
+		for (int i = 0; i < light_source_count; i++) {
+			Ray point_to_light;
+			point_to_light.dir = normalize(light_source[i] - intersect.point);
+			point_to_light.origin = intersect.point + epsilon * intersect.normal;
+	
+			// Create fresh object to calculate if shadowed point or not
+			Intersection shadow_intersection;
+			shadow_intersection.hit = 0;
+		    shadow_intersection.t = -1;
+			shadow_intersection.colour = vec3(0,0,0); 
+			shadow_intersection.point = vec3(0,0,0);
+			shadow_intersection.normal = vec3(0,0,0);
+		
+			Intersect(point_to_light, shadow_intersection);
+		
+			// Multiply by black if shadowed, calculate diffuse otherwise
+			if (shadow_intersection.hit == 1) {
+				soft_shadow += black;
+			} else {
+				soft_shadow += phong_shader(intersect, light_source[i]);
+			}
+		}
+		return soft_shadow / light_source_count;
 	}
 }
 
@@ -397,51 +449,7 @@ float rnd()
 	seed = int(mod(float(seed)*1364.0+626.0, 509.0));
 	return float(seed)/509.0;
 }
-/*
-Intersection mirror_intersect(Ray ray, Intersection intersection)
-{
-	Ray mirror;
-	mirror.origin = intersection.point + epsilon * intersection.normal;
-	mirror.dir = ray.dir - dot(2*ray.dir, intersection.normal)*intersection.normal;
 
-	Intersection mirror_intersection;
-	mirror_intersection.hit = 0;
-	mirror_intersection.colour = vec3(0); 
-    mirror_intersection.t = -1;
-	mirror_intersection.point = vec3(0,0,0);
-	mirror_intersection.normal = vec3(0,0,0);
-
-	Intersect(mirror, mirror_intersection);
-	
-
-	return mirror_intersection;
-}
-*/
-/*
-vec3 refract_intersect(Ray ray, Intersection intersection)
-{	
-	Ray refract_ray;
-	refract_ray.origin = intersection.point;
-
-	float snell_const_1 = air_snell / glass_snell;
-	float snell_const_2 = glass_snell / air_snell;
-	float n_dot_v = 	dot(intersection.normal, ray.dir);
-	float sqrt_const = sqrt(pow(n_dot_v, 2) + pow(snell_const_2, 2) - 1);
-//	refract_dir = snell_const_1 * (dot(sqrt_const - n_dot_v, intersection.normal) + ray.dir);
-	vec3 refract_dir = snell_const_1 * (sqrt_const - n_dot_v) * intersection.normal + ray.dir;
-	refract_ray.dir = refract_dir;
-
-	Intersection refract_intersection;
-	refract_intersection.hit = 0;
-	refract_intersection.colour = vec3(0); 
-    refract_intersection.t = -1;
-	refract_intersection.point = vec3(0,0,0);
-	refract_intersection.normal = vec3(0,0,0);
-
-	Intersect(refract_ray, refract_intersection);
-	return refract_intersection.colour;
-}
-*/
 void main()
 {
 	//please leave the scene config unaltered for marking 
@@ -469,46 +477,66 @@ void main()
 	seed = int(mod(dir.x * dir.y * 39786038.0, 65536.0));
 	//scene definition end
 
+	// Initialize ray position and direction
 	Ray ray;
-	ray.origin = vec3(0,0,0);
-	ray.dir = normalize(dir);
+	// Scene starts way too far ahead of the spheres, move it back by 40 units
+	vec3 scene_start_offset = vec3(0,0, -30.4);
+	ray.origin = -(mvMatrixScene * vec4(0,0,0, 1)).xyz + scene_start_offset;
 
-	vec3 colour = vec3(0,0,0);
+	// Extract rotation from mvMatrix
+	// Scale vectors
+	float s_x = length(vec3(mvMatrixScene[0][0], mvMatrixScene[1][0], mvMatrixScene[2][0]));
+	float s_y = length(vec3(mvMatrixScene[0][1], mvMatrixScene[1][1], mvMatrixScene[2][1]));
+	float s_z = length(vec3(mvMatrixScene[0][2], mvMatrixScene[1][2], mvMatrixScene[2][2]));
 
-	float frac = 1.0;
+	// Generate rotation matrix	
+	mat4 rot_matrix = mat4((mvMatrixScene[0]/s_x).xyz, 0,
+						   (mvMatrixScene[1]/s_y).xyz, 0,
+						   (mvMatrixScene[2]/s_z).xyz, 0,
+						   0, 0, 0, 1);
+	// Apply ray direction given mouse movement
+	ray.dir = (rot_matrix * vec4(normalize(dir), 0)).xyz;
+
+	// Scene colour starts completely black
+	vec3 colour = black;
+	
+	// Decreasing constant for ray strength on every reflection
+	float rayStrength = 1.0;
+
+	// Intersection object initialization 
 	Intersection intersection;
 	intersection.point = vec3(0,0,0);
 	intersection.colour = vec3(1);
 
-	for (int i = 0; i < 2; i++) {
-		// Initialize / reset ray intersection		
-//		intersection.hit = 0;
-//		intersection.colour = colour;
-
+	for (int i = 0; i < raytraceDepth; i++) {
+		// Reset hit status on intersection object
 	    intersection.t = -1;
 		intersection.normal = vec3(0,0,0);
 
 		// Initial intersection
 		Intersect(ray, intersection);
-
+		if (intersection.hit == 0) {
+			break;
+		}
 		// Shadow & diffuse shading
 		vec3 local_shading = computeShadow(intersection);
 
 		// Colour 
-		colour += local_shading * k_reflect * frac;
+		colour += local_shading * k_reflect * rayStrength;
 
 		// Decrease strength of reflected ray
-		frac *= k_reflect;
+		rayStrength *= k_reflect;
 
 		// Reflect the ray
 		ray.origin = intersection.point + epsilon * intersection.normal;
 		ray.dir = reflect(ray.dir, normalize(intersection.normal));	
-
 	}
 
+	// Extract final colours and dim scene using the camera filter
 	vec4 final_colour = vec4(colour.x, colour.y, colour.z, 1) * cam_filter;
 	outcolour = final_colour;
 }
+
 
 
 
